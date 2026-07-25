@@ -1,8 +1,9 @@
 {
   "name": "precision-server",
-  "version": "0.1.0",
-  "description": "Party Game de Précision — moteur de règles (Node)",
-  "main": "src/engine-precision.js",
-  "scripts": { "test": "node test-engine.js" },
-  "engines": { "node": ">=18" }
+  "version": "1.0.0",
+  "description": "Party Game de Précision — serveur arbitre (Node + ws)",
+  "main": "src/server.js",
+  "scripts": { "start": "node src/server.js", "test": "node test-engine.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "ws": "^8.18.0" }
 }

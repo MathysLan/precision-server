@@ -1,80 +1,41 @@
-# engine-precision.js — Party Game de Précision
+# precision-server — Party Game de Précision
 
-Moteur PUR (règles + barèmes + scoring) du party game inspiré de dialed.gg.
-Aucun socket, aucun `setTimeout` ici : c'est `server.js` qui tient le transport
-`ws` et les timers de phase, en lisant les durées dans `DIFFICULTY`.
+Serveur arbitre (Node + `ws`). Tout le monde joue en même temps : le serveur
+génère la cible, tient les timers de phase (c'est ça, la difficulté) et calcule
+la précision de chacun de 0 à 100 %.
+
+## Lancer
+```
+npm install     # ws
+npm start       # écoute sur :8080 (PORT modifiable)
+```
 
 ## Tester
 ```
-node test-engine.js      # 60 assertions, purement synchrone
+node test-engine.js                        # 60 assertions, règles pures
+PORT=8145 node src/server.js &             # puis :
+PORT=8145 node test-e2e.js                 # partie complète, 2 clients ws
 ```
 
-## Boucle d'un round (pilotée par server.js)
+## Architecture
+- `src/engine-precision.js` : RÈGLES pures (difficultés, génération des cibles,
+  validation, les 4 calculs de précision). Aucun socket / timer. 100 % testable.
+- `src/server.js` : transport `ws`, lobby, machine à états et `setTimeout` de
+  phase. C'est l'arbitre absolu.
+
+## Boucle
 ```
-generate → memorize → play → reveal → (round suivant)
+lobby → memorize → play → reveal → (le MJ enchaîne) → … → end
 ```
+`memorize` et `play` sont chronométrés par le serveur (durées = difficulté).
+Entre deux manches, c'est le MJ qui relance. `reveal` part aussi dès que **tout
+le monde a validé**, sans attendre la fin du chrono.
 
-## Câblage côté server.js (résumé)
-
-```js
-const engine = require('./engine-precision');
-
-function nextRound(room) {
-  engine.purge(room.r);
-  const type   = engine.pickType(Math.random, room.forcedType);   // ou choix du MJ
-  const target = engine.generateTarget(type);
-  room.r = engine.createRound(type, target, room.difficulty);
-  const t = engine.timings(room.r);
-
-  // memorize : on envoie la cible (pour `time`, juste la consigne)
-  room.r.phase = 'memorize';
-  broadcast(room, { type:'phase', phase:'memorize', game:type,
-                    target: engine.memorizePayload(room.r), ms: t.memorizeMs });
-
-  room.r.timer = setTimeout(() => {
-    // play : AUCUNE cible envoyée — les clients repartent de zéro
-    room.r.phase = 'play';
-    room.r.startedAt = Date.now();
-    broadcast(room, { type:'phase', phase:'play', game:type, ms: t.playMs });
-    room.r.timer = setTimeout(() => reveal(room), t.playMs);
-  }, t.memorizeMs);
-}
-
-function onSubmit(ws, m) {                       // { action:'submit', type, data }
-  const r = room.r;
-  const v = engine.validateSubmission(r, m.type, m.data);
-  if (!v.ok) return sendError(ws, v.error);
-  engine.record(r, ws.id, v.data, Date.now() - r.startedAt);
-  broadcast(room, { type:'ready', ids:[...r.submissions.keys()] });
-  if (engine.allSubmitted(r, [...room.players.keys()])) reveal(room);   // tout le monde a validé
-}
-
-function reveal(room) {
-  clearTimeout(room.r.timer);
-  room.r.phase = 'reveal';
-  const out = engine.computeResults(room.r, [...room.players.keys()]);
-  for (const row of out.results) room.players.get(row.id).score += row.points;
-  broadcast(room, { type:'phase', phase:'reveal', ...out, scores: scoreboard(room) });
-}
-```
-
-## Ce que renvoie `computeResults`
-
-```js
-{
-  type: 'color', difficulty: 'moyen',
-  target: { h: 200, s: 80, l: 45 },            // révélée ICI seulement
-  results: [
-    { id:'p1', submitted:true, accuracy:92.4, points:92,
-      data:{ h:205, s:78, l:44 },               // valeur exacte → superposition front
-      parts:{ h:87.5, s:92, l:96 },             // détail par composante
-      deltas:{ h:5, s:2, l:1 } },               // écarts bruts
-    { id:'p2', submitted:false, accuracy:0, points:0, data:null },
-  ],
-}
-```
+## Zéro confiance
+- La cible n'est envoyée qu'en `memorize` (pour `time`, c'est juste la consigne).
+- Pendant `play`, le serveur n'envoie **rien** : impossible de relire la réponse.
+- Pour `time`, le chrono annoncé est recoupé à l'horloge serveur (±400 ms).
+- Les données reçues sont validées ET clampées (h:400 → 40, s:150 → 100).
 
 ## Réglages
-Tout est dans `DIFFICULTY` (durées + tolérances par épreuve). La tolérance est
-l'écart qui donne 0 % ; en dessous, la note est linéaire jusqu'à 100 %.
-# precision-server
+Durées + tolérances dans `DIFFICULTY` (engine). `PORT`, `LEAD_MS` en env.
