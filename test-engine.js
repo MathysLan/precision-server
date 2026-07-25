@@ -32,7 +32,14 @@ for (const t of e.TYPES) {
 }
 const shp = e.generateTarget('shape', () => 0.5);
 check('shape : x,y dans 0..100', shp.x >= 0 && shp.x <= 100 && shp.y >= 0 && shp.y <= 100);
-check('shape : symétrie du triangle (sym=3)', shp.sym === 3);
+check('shape : une forme est tirée du catalogue', e.SHAPE_KINDS.some((k) => k.id === shp.kind));
+check('shape : la symétrie correspond à la forme',
+  shp.sym === e.SHAPE_KINDS.find((k) => k.id === shp.kind).sym);
+// sur 300 tirages, on doit voir plusieurs formes différentes (pas que du triangle)
+const kinds = new Set(Array.from({ length: 300 }, () => e.generateTarget('shape').kind));
+check('shape : les formes varient (triangle, cercle, ovale…)', kinds.size >= 5);
+check('shape : le cercle n\'a pas d\'angle imposé',
+  e.SHAPE_KINDS.find((k) => k.id === 'cercle').sym === 0);
 const snd = e.generateTarget('sound', () => 0.5);
 check('sound : fréquence dans 200..800 Hz', snd.frequency >= 200 && snd.frequency <= 800);
 const tim = e.generateTarget('time', () => 0.5);
@@ -73,6 +80,16 @@ check('shape : rotation 60° ≠ identique',
   e.scoreShape(tShape, { x: 50, y: 50, scale: 1, rotation: 60 }, tolM.shape).parts.rot < 100);
 check('shape : détail par composante fourni',
   ['pos', 'scale', 'rot'].every((k) => k in e.scoreShape(tShape, { x: 50, y: 50, scale: 1, rotation: 0 }, tolM.shape).parts));
+
+// --- cas du cercle : la rotation ne veut rien dire, on ne doit PAS la noter ---
+const tCircle = { x: 50, y: 50, scale: 1, rotation: 0, sym: 0 };
+const cA = e.scoreShape(tCircle, { x: 50, y: 50, scale: 1, rotation: 0 }, tolM.shape);
+const cB = e.scoreShape(tCircle, { x: 50, y: 50, scale: 1, rotation: 217 }, tolM.shape);
+check('cercle : position/taille parfaites = 100 % quel que soit l\'angle',
+  cA.accuracy === 100 && cB.accuracy === 100);
+check('cercle : la rotation n\'est pas notée', cB.parts.rot === null && cB.deltas.rot === null);
+check('cercle : la position compte toujours',
+  e.scoreShape(tCircle, { x: 50 + tolM.shape.pos + 5, y: 50, scale: 1, rotation: 0 }, tolM.shape).accuracy < 100);
 
 // --- SCORING : color --------------------------------------------------------
 const tCol = { h: 10, s: 50, l: 50 };

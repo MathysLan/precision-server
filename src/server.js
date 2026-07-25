@@ -139,7 +139,11 @@ function startPlay(room, t) {
   if (!r) return;
   r.phase = 'play'; room.phase = 'play';
   r.startedAt = Date.now();
-  broadcastPhase(room, 'play', { game: r.type, ms: t.playMs });
+  // pour `shape`, le front doit savoir QUELLE forme dessiner : le type de forme
+  // n'est pas le secret (on l'a vu en mémorisation), seule sa pose l'est.
+  const extra = { game: r.type, ms: t.playMs };
+  if (r.type === 'shape') { extra.kind = r.target.kind; extra.sym = r.target.sym; }
+  broadcastPhase(room, 'play', extra);
   console.log(`[round ${room.roundNo}] play ${t.playMs}ms`);
   clearRoundTimer(room);
   r.timer = setTimeout(() => reveal(room), t.playMs);

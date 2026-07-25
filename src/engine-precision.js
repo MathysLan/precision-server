@@ -45,6 +45,20 @@ const DEFAULT_DIFFICULTY = 'moyen';
 const diffOf = (key) => DIFFICULTY[String(key || '').toLowerCase()] || DIFFICULTY[DEFAULT_DIFFICULTY];
 
 const TYPES = ['shape', 'color', 'sound', 'time'];
+
+// Formes possibles de l'épreuve `shape`. `sym` = ordre de symétrie de rotation :
+// un carré tourné de 90° est identique, un triangle de 120°, etc. On s'en sert
+// pour ne PAS punir un joueur qui a l'angle visuellement juste.
+// `sym: 0` = la rotation n'a aucun sens (cercle) → elle n'est pas notée.
+const SHAPE_KINDS = [
+  { id: 'triangle', sym: 3 },
+  { id: 'carre', sym: 4 },
+  { id: 'rectangle', sym: 2 },
+  { id: 'cercle', sym: 0 },
+  { id: 'ovale', sym: 2 },
+  { id: 'pentagone', sym: 5 },
+  { id: 'hexagone', sym: 6 },
+];
 const PHASES = ['generate', 'memorize', 'play', 'reveal'];
 
 // --- helpers maths ---------------------------------------------------------
@@ -107,10 +121,12 @@ function pickType(rng = Math.random, forced) {
 
 function generateTarget(type, rng = Math.random) {
   if (type === 'shape') {
+    const kind = SHAPE_KINDS[Math.floor(rng() * SHAPE_KINDS.length)];
     return {
+      kind: kind.id, sym: kind.sym,
       x: round3(rnd(rng, 20, 80)), y: round3(rnd(rng, 20, 80)),
-      scale: round3(rnd(rng, 0.5, 1.5)), rotation: round3(rnd(rng, 0, 360)),
-      sym: 3,                                   // triangle : 3 positions identiques
+      scale: round3(rnd(rng, 0.5, 1.5)),
+      rotation: kind.sym === 0 ? 0 : round3(rnd(rng, 0, 360)),   // un cercle n'a pas d'angle
     };
   }
   if (type === 'color') {
@@ -172,13 +188,21 @@ const allSubmitted = (round, playerIds) => playerIds.every((id) => round.submiss
 // le front puisse expliquer l'écart (« position ok, rotation ratée »).
 
 // Shape : position (40 %), taille (30 %), rotation (30 %).
+// Cas du cercle (`sym: 0`) : la rotation n'a aucun sens visuel, on ne la note
+// pas et son poids est réparti sur la position et la taille.
 function scoreShape(target, data, tol) {
   const dPos = Math.hypot(data.x - target.x, data.y - target.y);
   const dScale = Math.abs(data.scale - target.scale);
-  const dRot = foldAngle(data.rotation, target.rotation, target.sym || 1);
-  const parts = { pos: pct(grade(dPos, tol.pos)), scale: pct(grade(dScale, tol.scale)), rot: pct(grade(dRot, tol.rot)) };
-  const acc = 0.40 * (parts.pos / 100) + 0.30 * (parts.scale / 100) + 0.30 * (parts.rot / 100);
-  return { accuracy: pct(acc), parts, deltas: { pos: round3(dPos), scale: round3(dScale), rot: round3(dRot) } };
+  const noRot = !target.sym;
+  const dRot = noRot ? 0 : foldAngle(data.rotation, target.rotation, target.sym);
+  const parts = {
+    pos: pct(grade(dPos, tol.pos)), scale: pct(grade(dScale, tol.scale)),
+    rot: noRot ? null : pct(grade(dRot, tol.rot)),
+  };
+  const acc = noRot
+    ? 0.55 * (parts.pos / 100) + 0.45 * (parts.scale / 100)
+    : 0.40 * (parts.pos / 100) + 0.30 * (parts.scale / 100) + 0.30 * (parts.rot / 100);
+  return { accuracy: pct(acc), parts, deltas: { pos: round3(dPos), scale: round3(dScale), rot: noRot ? null : round3(dRot) } };
 }
 
 // Color : teinte (50 %), saturation (25 %), luminosité (25 %). La teinte boucle.
@@ -241,7 +265,7 @@ const fail = (error) => ({ ok: false, error });
 
 module.exports = {
   DIFFICULTY, DEFAULT_DIFFICULTY, TYPES, PHASES, diffOf,
-  createRound, timings, tolOf, canGoTo,
+  SHAPE_KINDS, createRound, timings, tolOf, canGoTo,
   pickType, generateTarget, memorizePayload,
   validateSubmission, record, hasSubmitted, allSubmitted,
   scoreShape, scoreColor, scoreSound, scoreTime, scoreOne,
