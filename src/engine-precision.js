@@ -129,7 +129,11 @@ function pickType(rng = Math.random, forced) {
   return TYPES[Math.floor(rng() * TYPES.length)];
 }
 
-function generateTarget(type, rng = Math.random) {
+// `difficulty` compte pour les épreuves CHRONOMÉTRÉES : la cible doit toujours
+// tenir dans la phase de jeu, sinon elle est injouable (en Impossible la phase
+// dure 7 s : demander d'attendre 9 s n'a aucun sens).
+function generateTarget(type, rng = Math.random, difficulty = DEFAULT_DIFFICULTY) {
+  const playMs = diffOf(difficulty).playMs;
   if (type === 'shape') {
     const kind = SHAPE_KINDS[Math.floor(rng() * SHAPE_KINDS.length)];
     return {
@@ -149,14 +153,19 @@ function generateTarget(type, rng = Math.random) {
   if (type === 'reflex') {
     // délai avant le vert. Le serveur le garde pour LUI : c'est lui qui donnera
     // le top (message `green`), sinon un client pourrait s'armer à l'avance.
-    return { green_after_ms: Math.round(rnd(rng, 1500, 5500)) };
+    // Plafonné à 55 % de la phase : il faut le temps de réagir APRÈS le vert.
+    const maxGreen = Math.max(1200, Math.min(5500, playMs * 0.55));
+    return { green_after_ms: Math.round(rnd(rng, 1200, maxGreen)) };
   }
   if (type === 'typing') {
     const pool = shuffleArr(TYPING_WORDS, rng);
     return { words: pool.slice(0, 40) };     // large : personne ne doit finir la liste
   }
-  // time : la consigne (« arrête à X ms ») + l'instant où le chrono se cache
-  const target_ms = Math.round(rnd(rng, 2500, 9000));
+  // time : la consigne (« arrête à X ms ») + l'instant où le chrono se cache.
+  // La cible doit rester ATTEIGNABLE : on garde une marge à la fin de la phase
+  // pour laisser le temps de cliquer (et à la validation auto de partir).
+  const maxTarget = Math.max(2000, Math.min(9000, playMs - 1800));
+  const target_ms = Math.round(rnd(rng, Math.min(2000, maxTarget), maxTarget));
   return { target_ms, hide_after_ms: Math.round(target_ms * rnd(rng, 0.25, 0.45)) };
 }
 

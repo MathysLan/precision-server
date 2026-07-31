@@ -118,7 +118,8 @@ function nextRound(room) {
   room.roundNo++;
 
   const type = engine.pickType(Math.random, room.forcedGame);
-  const target = engine.generateTarget(type);
+  // la difficulté borne les cibles chronométrées (time / reflex)
+  const target = engine.generateTarget(type, Math.random, room.difficulty);
   room.r = engine.createRound(type, target, room.difficulty);
   const t = engine.timings(room.r);
 
