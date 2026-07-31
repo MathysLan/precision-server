@@ -26,25 +26,35 @@
 const DIFFICULTY = {
   facile: {
     label: 'Facile', memorizeMs: 5000, playMs: 20000, revealMs: 8000,
-    tol: { shape: { pos: 22, scale: 0.50, rot: 60 }, color: { h: 60, s: 35, l: 35 }, sound: { cents: 500 }, time: { ms: 1200 } },
+    tol: { shape: { pos: 22, scale: 0.50, rot: 60 }, color: { h: 60, s: 35, l: 35 }, sound: { cents: 500 }, time: { ms: 1200 }, reflex: { ms: 700 }, typing: { wpm: 20 } },
   },
   moyen: {
     label: 'Moyen', memorizeMs: 3000, playMs: 15000, revealMs: 7000,
-    tol: { shape: { pos: 15, scale: 0.35, rot: 40 }, color: { h: 40, s: 25, l: 25 }, sound: { cents: 350 }, time: { ms: 800 } },
+    tol: { shape: { pos: 15, scale: 0.35, rot: 40 }, color: { h: 40, s: 25, l: 25 }, sound: { cents: 350 }, time: { ms: 800 }, reflex: { ms: 500 }, typing: { wpm: 30 } },
   },
   difficile: {
     label: 'Difficile', memorizeMs: 2000, playMs: 10000, revealMs: 6000,
-    tol: { shape: { pos: 9, scale: 0.22, rot: 25 }, color: { h: 25, s: 16, l: 16 }, sound: { cents: 200 }, time: { ms: 450 } },
+    tol: { shape: { pos: 9, scale: 0.22, rot: 25 }, color: { h: 25, s: 16, l: 16 }, sound: { cents: 200 }, time: { ms: 450 }, reflex: { ms: 350 }, typing: { wpm: 45 } },
   },
   impossible: {
     label: 'Impossible', memorizeMs: 1000, playMs: 7000, revealMs: 5000,
-    tol: { shape: { pos: 5, scale: 0.12, rot: 14 }, color: { h: 14, s: 9, l: 9 }, sound: { cents: 110 }, time: { ms: 220 } },
+    tol: { shape: { pos: 5, scale: 0.12, rot: 14 }, color: { h: 14, s: 9, l: 9 }, sound: { cents: 110 }, time: { ms: 220 }, reflex: { ms: 220 }, typing: { wpm: 65 } },
   },
 };
 const DEFAULT_DIFFICULTY = 'moyen';
 const diffOf = (key) => DIFFICULTY[String(key || '').toLowerCase()] || DIFFICULTY[DEFAULT_DIFFICULTY];
 
-const TYPES = ['shape', 'color', 'sound', 'time'];
+const TYPES = ['shape', 'color', 'sound', 'time', 'reflex', 'typing'];
+
+// Mots courants pour l'épreuve de frappe (fr, sans accent piégeux ni ponctuation).
+const TYPING_WORDS = ['maison', 'soleil', 'orange', 'clavier', 'rapide', 'jardin', 'fenetre', 'nuage',
+  'pierre', 'chemin', 'lumiere', 'bateau', 'montagne', 'silence', 'papier', 'cuisine', 'voyage', 'musique',
+  'fromage', 'tempete', 'village', 'miroir', 'guitare', 'chocolat', 'planete', 'bureau', 'famille', 'couleur',
+  'histoire', 'machine', 'network', 'requete', 'serveur', 'donnee', 'table', 'index', 'colonne', 'schema'];
+
+// Meilleur temps de réaction humain : en dessous, c'est de l'anticipation.
+// On note l'écart AU-DESSUS de ce plancher, sinon tout le monde plafonne à 0.
+const REFLEX_FLOOR_MS = 150;
 
 // Formes possibles de l'épreuve `shape`. `sym` = ordre de symétrie de rotation :
 // un carré tourné de 90° est identique, un triangle de 120°, etc. On s'en sert
@@ -136,9 +146,25 @@ function generateTarget(type, rng = Math.random) {
     // tirage LOG-uniforme entre 200 et 800 Hz : autant de graves que d'aigus à l'oreille
     return { frequency: round3(200 * Math.pow(4, rng())) };
   }
+  if (type === 'reflex') {
+    // délai avant le vert. Le serveur le garde pour LUI : c'est lui qui donnera
+    // le top (message `green`), sinon un client pourrait s'armer à l'avance.
+    return { green_after_ms: Math.round(rnd(rng, 1500, 5500)) };
+  }
+  if (type === 'typing') {
+    const pool = shuffleArr(TYPING_WORDS, rng);
+    return { words: pool.slice(0, 40) };     // large : personne ne doit finir la liste
+  }
   // time : la consigne (« arrête à X ms ») + l'instant où le chrono se cache
   const target_ms = Math.round(rnd(rng, 2500, 9000));
   return { target_ms, hide_after_ms: Math.round(target_ms * rnd(rng, 0.25, 0.45)) };
+}
+
+// Mélange (Fisher-Yates), rng injectable pour rester testable.
+function shuffleArr(arr, rng = Math.random) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
 }
 
 // Ce qu'on envoie aux clients en phase `memorize`. Pour `time`, ce n'est pas un
@@ -146,6 +172,11 @@ function generateTarget(type, rng = Math.random) {
 function memorizePayload(round) {
   const t = round.target;
   if (round.type === 'time') return { target_ms: t.target_ms, hide_after_ms: t.hide_after_ms };
+  // reflex : on n'envoie RIEN. Le délai avant le vert reste au serveur, c'est
+  // lui qui donnera le top — sinon on pourrait programmer son clic à l'avance.
+  if (round.type === 'reflex') return {};
+  // typing : les mots ne sont pas un secret, mais ils n'arrivent qu'en jeu.
+  if (round.type === 'typing') return {};
   return { ...t };
 }
 
@@ -170,6 +201,17 @@ function validateSubmission(round, type, data) {
     const f = n(data.frequency);
     if (!Number.isFinite(f) || f <= 0) return fail('sound : fréquence invalide');
     return ok({ frequency: clamp(f, 20, 20000) });
+  }
+  if (type === 'reflex') {
+    if (data.early) return ok({ ms: null, early: true });      // parti trop tôt : réaction non mesurée
+    const ms = n(data.ms);
+    if (!Number.isFinite(ms) || ms < 0) return fail('reflex : temps invalide');
+    return ok({ ms: clamp(ms, 0, 60000), early: false });
+  }
+  if (type === 'typing') {
+    const correct = Math.trunc(n(data.correct));
+    if (!Number.isFinite(correct) || correct < 0) return fail('typing : score invalide');
+    return ok({ correct: clamp(correct, 0, 500) });
   }
   const ms = n(data.ms !== undefined ? data.ms : data.time_ms);
   if (!Number.isFinite(ms) || ms < 0) return fail('time : durée invalide');
@@ -236,11 +278,33 @@ function scoreTime(target, data, tol) {
   };
 }
 
-const SCORERS = { shape: scoreShape, color: scoreColor, sound: scoreSound, time: scoreTime };
+// Reflex : temps de réaction. On note l'écart AU-DESSUS du plancher humain
+// (~150 ms) : sinon, même un excellent réflexe semblerait « en retard ».
+// Partir avant le vert = 0 (on ne récompense pas l'anticipation).
+function scoreReflex(target, data, tol) {
+  if (data.early || data.ms == null) {
+    return { accuracy: 0, parts: { ms: 0 }, deltas: { ms: null, early: true } };
+  }
+  const over = Math.max(0, data.ms - REFLEX_FLOOR_MS);
+  const a = pct(grade(over, tol.ms));
+  return { accuracy: a, parts: { ms: a }, deltas: { ms: Math.round(data.ms), early: false } };
+}
+
+// Typing : vitesse de frappe en mots/minute, ramenée à l'objectif de la difficulté.
+// `playMs` vient du round : c'est la durée réelle pendant laquelle on a tapé.
+function scoreTyping(target, data, tol, playMs) {
+  const minutes = Math.max(0.0001, (playMs || 60000) / 60000);
+  const wpm = data.correct / minutes;
+  const a = pct(clamp(wpm / tol.wpm, 0, 1));
+  return { accuracy: a, parts: { wpm: a }, deltas: { correct: data.correct, wpm: Math.round(wpm) } };
+}
+
+const SCORERS = { shape: scoreShape, color: scoreColor, sound: scoreSound, time: scoreTime, reflex: scoreReflex, typing: scoreTyping };
 
 // Note d'une tentative, quel que soit le type.
 function scoreOne(round, data) {
-  return SCORERS[round.type](round.target, data, tolOf(round));
+  // `typing` a besoin de la durée de la phase de jeu pour calculer des mots/minute
+  return SCORERS[round.type](round.target, data, tolOf(round), timings(round).playMs);
 }
 
 // --- résultats du round ----------------------------------------------------
@@ -265,10 +329,10 @@ const fail = (error) => ({ ok: false, error });
 
 module.exports = {
   DIFFICULTY, DEFAULT_DIFFICULTY, TYPES, PHASES, diffOf,
-  SHAPE_KINDS, createRound, timings, tolOf, canGoTo,
+  SHAPE_KINDS, TYPING_WORDS, REFLEX_FLOOR_MS, createRound, timings, tolOf, canGoTo,
   pickType, generateTarget, memorizePayload,
   validateSubmission, record, hasSubmitted, allSubmitted,
-  scoreShape, scoreColor, scoreSound, scoreTime, scoreOne,
+  scoreShape, scoreColor, scoreSound, scoreTime, scoreReflex, scoreTyping, scoreOne,
   computeResults, purge,
   // exposés pour les tests / le front
   foldAngle, hueDiff, centsDiff, grade,

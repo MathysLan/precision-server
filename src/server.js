@@ -143,9 +143,22 @@ function startPlay(room, t) {
   // n'est pas le secret (on l'a vu en mémorisation), seule sa pose l'est.
   const extra = { game: r.type, ms: t.playMs };
   if (r.type === 'shape') { extra.kind = r.target.kind; extra.sym = r.target.sym; }
+  if (r.type === 'typing') extra.words = r.target.words;   // les mots ne sont pas un secret
   broadcastPhase(room, 'play', extra);
   console.log(`[round ${room.roundNo}] play ${t.playMs}ms`);
   clearRoundTimer(room);
+
+  // REFLEX : c'est le SERVEUR qui donne le top vert, au moment qu'il a tiré.
+  // Le client ne connaît jamais le délai à l'avance → impossible de s'armer.
+  if (r.type === 'reflex') {
+    r.greenTimer = setTimeout(() => {
+      if (!room.r || room.r !== r || r.phase !== 'play') return;
+      r.greenAt = Date.now();
+      roomBroadcast(room, { type: 'green' });
+      console.log(`[round ${room.roundNo}] TOP vert après ${r.target.green_after_ms}ms`);
+    }, r.target.green_after_ms);
+  }
+
   r.timer = setTimeout(() => reveal(room), t.playMs);
 }
 
@@ -158,6 +171,18 @@ function onSubmit(ws, m) {
   if (!v.ok) return sendError(ws, v.error);
 
   let data = v.data;
+  // REFLEX : le serveur connaît l'instant du top vert. On recoupe le temps
+  // annoncé ; et un clic AVANT le top est un faux départ, quoi qu'en dise le client.
+  if (r.type === 'reflex') {
+    if (!r.greenAt) data = { ms: null, early: true };          // pas encore vert = faux départ
+    else if (!data.early) {
+      const serverMs = Date.now() - r.greenAt;
+      if (Math.abs(data.ms - serverMs) > CONFIG.TIME_TOL_MS) {
+        console.log(`[submit] ${ws.id} reflex recalé : client=${data.ms} serveur=${serverMs}`);
+        data = { ms: serverMs, early: false };
+      }
+    }
+  }
   // TIME : on recoupe le chrono annoncé avec l'horloge serveur (anti-triche).
   if (r.type === 'time') {
     const serverMs = Date.now() - r.startedAt;
@@ -209,7 +234,11 @@ function onLeave(ws) {
 }
 
 // ---------------------------------------------------------------- helpers
-function clearRoundTimer(room) { if (room.r && room.r.timer) { clearTimeout(room.r.timer); room.r.timer = null; } }
+function clearRoundTimer(room) {
+  if (!room.r) return;
+  if (room.r.timer) { clearTimeout(room.r.timer); room.r.timer = null; }
+  if (room.r.greenTimer) { clearTimeout(room.r.greenTimer); room.r.greenTimer = null; }
+}
 function scoreboard(room) {
   return [...room.players.values()].map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, score: p.score })).sort((a, b) => b.score - a.score);
 }
