@@ -11,6 +11,7 @@
 //
 // Protocole (JSON) :
 //   client → { action:'join', name, code?, avatar? }
+//            avatar = { kind:'emoji', emoji } | { kind:'image', emoji, src } — revalidé par src/avatar.js
 //   client → { action:'start', rounds?, difficulty?, game? }   host, lobby
 //   client → { action:'next' }                                 host : round suivant
 //   client → { action:'submit', type, data }                   pendant `play`
@@ -25,6 +26,7 @@
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const engine = require('./engine-precision');
+const { cleanAvatar } = require('./avatar');
 
 const CONFIG = {
   MIN_PLAYERS: 1, MAX_PLAYERS: 12,
@@ -82,7 +84,7 @@ function onJoin(ws, { name, code, avatar }) {
     if (room.players.size >= CONFIG.MAX_PLAYERS) return sendError(ws, 'room pleine');
   }
   ws.room = room.code;
-  room.players.set(ws.id, { id: ws.id, name: cleanName, avatar: String(avatar || '🙂').slice(0, 4), ws, score: 0 });
+  room.players.set(ws.id, { id: ws.id, name: cleanName, avatar: cleanAvatar(avatar, '🙂'), ws, score: 0 });
   sendRoomState(room);
 }
 
@@ -207,7 +209,7 @@ function reveal(room) {
   const results = out.results.map((row) => {
     const p = room.players.get(row.id);
     if (p) p.score += row.points;
-    return { ...row, name: p ? p.name : '?', avatar: p ? p.avatar : '🙂' };
+    return { ...row, name: p ? p.name : '?', avatar: p ? p.avatar : cleanAvatar(null, '🙂') };
   });
   broadcastPhase(room, 'reveal', { game: r.type, target: out.target, results, scores: scoreboard(room) });
   console.log(`[round ${room.roundNo}] reveal — ${results.length} joueur(s)`);
