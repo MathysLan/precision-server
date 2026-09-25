@@ -22,6 +22,13 @@ PORT=8145 node test-e2e.js                 # partie complète, 2 clients ws
   validation, les 4 calculs de précision). Aucun socket / timer. 100 % testable.
 - `src/server.js` : transport `ws`, lobby, machine à états et `setTimeout` de
   phase. C'est l'arbitre absolu.
+- `src/presence.js` : présence APPLICATIVE des joueurs. Un onglet gelé garde
+  son WebSocket ouvert (et répond même au ping natif) : sans ça, il restait
+  compté dans sa room. `{ type:'presence', n }` toutes les `PRESENCE_MS`
+  (10 s), réponse `{ action:'presence', n }` ; sans preuve de vie depuis
+  `ABSENCE_MS` (30 s), `close(4000,'absent')` puis `terminate()`. Adhésion
+  volontaire (un ancien client n'est jamais expulsé), aucune room connue : le
+  `close` habituel fait le ménage. `node test-presence.js` (lance son serveur).
 
 ## Boucle
 ```

@@ -27,6 +27,7 @@ const http = require('http');
 const { WebSocketServer } = require('ws');
 const engine = require('./engine-precision');
 const { cleanAvatar } = require('./avatar');
+const presenceJoueurs = require('./presence');
 
 const CONFIG = {
   MIN_PLAYERS: 1, MAX_PLAYERS: 12,
@@ -43,6 +44,9 @@ const server = http.createServer((_req, res) => {
   res.end(JSON.stringify({ ok: true, service: 'precision-server', rooms: rooms.size, difficulties: Object.keys(engine.DIFFICULTY), games: engine.TYPES }, null, 2));
 });
 const wss = new WebSocketServer({ server });
+// Présence applicative : un onglet gelé ne reste pas compté dans sa room (voir
+// src/presence.js). Le module ne fait que fermer le socket ; onLeave fait le reste.
+const presence = presenceJoueurs.attach(wss);
 
 const CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function newCode() { let c; do { c = Array.from({ length: 4 }, () => CHARS[Math.floor(Math.random() * CHARS.length)]).join(''); } while (rooms.has(c)); return c; }
@@ -61,6 +65,7 @@ wss.on('connection', (ws) => {
   ws.id = 'p' + nextId++;
   ws.on('message', (raw) => {
     let m; try { m = JSON.parse(raw); } catch { return sendError(ws, 'JSON invalide'); }
+    if (presence.consume(ws, m)) return;   // { action: 'presence', n } : jamais « action inconnue »
     if (m.action === 'join') onJoin(ws, m);
     else if (m.action === 'start') onStart(ws, m);
     else if (m.action === 'next') onNext(ws);
