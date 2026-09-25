@@ -33,7 +33,8 @@
 // réseau franches (TCP mort, téléphone hors ligne), qui ne répondent plus du
 // tout, même au niveau réseau. Il ne sert JAMAIS de preuve de présence.
 //
-// Même fichier, à terme, dans chaque dépôt serveur (comme avatar.js).
+// Même fichier dans chaque dépôt serveur (comme avatar.js) : on le copie, on
+// ne l'adapte pas. Ce qui est propre à un jeu reste dans son server.js.
 'use strict';
 
 const crypto = require('crypto');
@@ -43,6 +44,7 @@ const DEFAUTS = {
   absenceMs: +process.env.ABSENCE_MS || 30000,      // sans preuve de vie depuis… → absent
   nativeMs: +process.env.NATIVE_PING_MS || 20000,   // ping/pong WebSocket natif
   killMs: +process.env.PRESENCE_KILL_MS || 3000,    // close() pas abouti → terminate()
+  holdMs: +process.env.PRESENCE_HOLD_MS || 60000,   // sursis par défaut de hold()
 };
 
 const ACTION = 'presence';
@@ -57,7 +59,7 @@ function attach(wss, options = {}) {
     // `cle` : un secret propre à CETTE connexion, envoyé à elle seule. Il ne
     // sert qu'à une chose : qu'une nouvelle connexion du même navigateur puisse
     // remplacer l'ancienne (voir remplacer()). Personne d'autre ne le voit.
-    ws.presence = { adhere: false, vu: Date.now(), natif: true, expulse: false, cle: crypto.randomBytes(12).toString('hex') };
+    ws.presence = { adhere: false, vu: Date.now(), natif: true, expulse: false, sursis: 0, cle: crypto.randomBytes(12).toString('hex') };
     // N'importe quel message du JavaScript de la page prouve qu'il tourne.
     ws.on('message', () => { ws.presence.vu = Date.now(); });
     // Le pong natif ne prouve QUE la couche réseau (un onglet gelé y répond).
@@ -103,7 +105,7 @@ function attach(wss, options = {}) {
     for (const ws of wss.clients) {
       const p = ws.presence;
       if (!p || p.expulse || ws.readyState !== ws.OPEN) continue;
-      if (p.adhere && maintenant - p.vu > o.absenceMs) { expulse(ws, o, maintenant - p.vu); continue; }
+      if (p.adhere && maintenant - p.vu > o.absenceMs && maintenant > p.sursis) { expulse(ws, o, maintenant - p.vu); continue; }
       // Envoyé à TOUS, adhérents ou non : c'est l'invitation à adhérer. Un
       // client qui ne connaît pas `presence` l'ignore.
       ws.send(JSON.stringify({ type: 'presence', n }));
@@ -127,6 +129,14 @@ function attach(wss, options = {}) {
   // présence y est avalé (valide ou non) et ne tombe JAMAIS dans « action
   // inconnue ». Rend true si le message était pour ce module.
   return {
+    // SURSIS : le serveur sait qu'un envoi long est en cours (Imitation : une
+    // prise audio, jusqu'à 2 Mo, annoncée par audio-meta). Ses réponses de
+    // présence attendent DERRIÈRE ces octets : sans sursis, un envoi lent
+    // passerait pour une absence. Le prochain message reçu lève le doute.
+    hold(ws, ms) {
+      if (ws.presence) ws.presence.sursis = Date.now() + (ms || o.holdMs);
+    },
+
     consume(ws, msg) {
       if (!msg || msg.action !== ACTION) return false;
       const k = msg.n;
